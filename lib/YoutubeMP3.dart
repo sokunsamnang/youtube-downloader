@@ -1,10 +1,7 @@
 import 'dart:io';
-
-import 'package:YouTube_MP3_Downloader/Models/YouTubeVideo.dart';
 import 'package:ext_storage/ext_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path/path.dart' as path;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
@@ -18,35 +15,27 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
   TextEditingController urlYouTube = TextEditingController();
   YoutubeExplode _youtubeExplode = YoutubeExplode();
 
-  Result videos;
   bool isFetching = false;
   bool fetchSuccess = false;
   bool isDownloading = false;
   bool downloadsuccess = false;
-  String status = "Download ";
-  String progress = "";
-  Map<String, String> headers = {
-    "X-Requested-With": "XMLHttpRequest",
-  };
-
-  Map<String, String> body;
-
-  void insertBody(String urlYouTube) {
-    body = {"url": urlYouTube};
-  }
+  String status = "Download MP3 ";
+  var _progress;
 
   //----------------------------------Get Video Info
 
   Future<Video> getInfo() async {
+    var video = await _youtubeExplode.videos.get(urlYouTube.text);
+
     setState(() {
-      progress = "";
+      _progress = 0;
       status = "Download MP3";
       downloadsuccess = false;
       isDownloading = false;
       isFetching = true;
       fetchSuccess = false;
     });
-    var video = await _youtubeExplode.videos.get(urlYouTube.text);
+    
     try {
       setState(() {
         isFetching = false;
@@ -78,6 +67,29 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
 
 //----------------------------------Download MP3
   Future<void> downloadMp3() async {
+    
+    setState(() {
+      _progress = 0;
+      status = "Download MP3";
+      downloadsuccess = false;
+      isDownloading = false;
+      isFetching = true;
+      fetchSuccess = false;
+    });
+    
+    try {
+      setState(() {
+        isFetching = false;
+        fetchSuccess = true;
+      });
+      
+    } catch (e) {
+      print(e.toString());
+      setState(() {
+        isFetching = true;
+        fetchSuccess = false;
+      });
+    }
 
     // Here you should validate the given input or else an error
     // will be thrown.
@@ -102,7 +114,7 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
     // Get the streams manifest and the audio track.
     var manifest = await _youtubeExplode.videos.streamsClient.getManifest(id);
     var audio = manifest.audioOnly.withHighestBitrate();
-
+    var audioStream = _youtubeExplode.videos.streamsClient.get(audio);
     // Build the directory.
     var dir = await ExtStorage.getExternalStoragePublicDirectory(ExtStorage.DIRECTORY_MUSIC);
     var filePath = path.join(dir, '${video.title}.mp3');
@@ -124,18 +136,84 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
     await fileStream.flush();
     await fileStream.close();
 
+    // // Show that the file was downloaded.
+    // await showDialog(
+    //   context: context,
+    //   builder: (context) {
+    //     return WillPopScope(
+    //       onWillPop: () async => false,
+    //       child: AlertDialog(
+    //         content: Text( 'Download completed and saved to: $filePath'),
+    //         actions: [
+    //           TextButton(
+    //             onPressed: (){
+    //               _youtubeExplode.close();
+    //               Navigator.pushAndRemoveUntil(
+    //                 context,
+    //                 MaterialPageRoute(builder: (context) => YoutubeMP3()),
+    //                 ModalRoute.withName('/'),
+    //               );
+    //             }, 
+    //             child: Text('OK'))
+    //         ],
+    //       ),
+    //     );
+    //   },
+    // );
+
+    // Create the StreamedRequest to track the download status.
+
+    // Open the file in appendMode.
+    var output = file.openWrite(mode: FileMode.writeOnlyAppend);
+
+    // Track the file download status.
+    var len = audio.size.totalBytes;
+    var count = 0;
+    var oldProgress = -1;
+
+    // Create the message and set the cursor position.
+    var msg = 'Downloading `${video.title}`(.${audio.container.name}):  \n';
+    print(msg); 
+
+    // Listen for data received.
+    await for (var data in audioStream) {
+      count += data.length;
+      var progress = ((count / len) * 100).round();
+      _progress = progress;
+      if (_progress != oldProgress) {
+        print('$_progress%');
+        oldProgress = _progress;
+      }
+      output.add(data);
+    }
+    await output.close();
+
     // Show that the file was downloaded.
     await showDialog(
       context: context,
       builder: (context) {
-        _youtubeExplode.close();
-        return AlertDialog(
-          content: Text( 'Download completed and saved to: $filePath'),
+        return WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            content: Text( 'Download completed and saved to: $filePath'),
+            actions: [
+              TextButton(
+                onPressed: (){
+                  _youtubeExplode.close();
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (context) => YoutubeMP3()),
+                    ModalRoute.withName('/'),
+                  );
+                }, 
+                child: Text('OK'))
+            ],
+          ),
         );
       },
     );
   }
-
+  
   void nothingHere() {
     print("Just Nothing");
   }
@@ -144,6 +222,7 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: searchBar(),
         backgroundColor: Color.fromARGB(255, 30, 30, 30),
         centerTitle: true,
@@ -225,21 +304,21 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
                   children: <Widget>[
                     Expanded(
                       child: Image(
-                        image: NetworkImage(snapshot.data.thumbnails.highResUrl),
+                        image: NetworkImage(snapshot.data!.thumbnails.highResUrl),
                       ),
                     ),
                     SizedBox(
                       height: 10.0,
                     ),
-                    labelTitle("Title : ", snapshot.data.title),
+                    labelTitle("Title : ", snapshot.data!.title),
                     SizedBox(
                       height: 8.0,
                     ),
-                    labelTitle("Duration : ", snapshot.data.duration.toString()),
+                    labelTitle("Duration : ", snapshot.data!.duration.toString()),
                     SizedBox(
                       height: 8.0,
                     ),
-                    FlatButton(
+                    _progress == 0 ? TextButton(
                       onPressed: () async {
                         downloadMp3(); 
                       },
@@ -247,7 +326,7 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
                         height: 40.0,
                         width: 200.0,
                         decoration: BoxDecoration(
-                          color: downloadsuccess == true
+                          color: _progress == 100
                               ? Colors.greenAccent
                               : Colors.redAccent,
                           borderRadius: BorderRadius.all(
@@ -267,25 +346,15 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
                               width: 12.0,
                             ),
                             Icon(
-                              isDownloading
-                                  ? FontAwesomeIcons.spinner
-                                  : downloadsuccess
-                                      ? FontAwesomeIcons.check
-                                      : FontAwesomeIcons.download,
+                              FontAwesomeIcons.download,
                               color: Colors.black,
                               size: 20.0,
                             )
                           ],
                         ),
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Text(
-                        progress,
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    ),
+                    )
+                    : CircularProgressIndicator(backgroundColor: Colors.redAccent,),
                   ],
                 ),
               ),
@@ -344,6 +413,10 @@ class _YoutubeMP3State extends State<YoutubeMP3> {
           Flexible(
             flex: 1,
             child: TextFormField(
+              onFieldSubmitted: (value){
+                getInfo();
+              },
+              textInputAction: TextInputAction.search,
               controller: urlYouTube,
               style: TextStyle(color: Colors.white),
               decoration: InputDecoration(
